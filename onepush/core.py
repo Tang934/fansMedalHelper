@@ -9,7 +9,7 @@ from loguru import logger
 
 # import requests
 from aiohttp import ClientSSLError, ClientSession, TCPConnector
-
+from ssl import SSLCertVerificationError
 
 # from requests.exceptions import SSLError
 
@@ -76,12 +76,15 @@ class Provider(object):
         # )
         # response = None
         try:
+            sessions = []
             if self.proxy:
                 connector = ProxyConnector.from_url(self.proxy)
-                session = ClientSession(connector=connector)
+                session = ClientSession(connector=connector, trust_env = True)
+                sessions.append(session)
                 response = await session.request(method, url, **kwargs)
             else:
-                session = ClientSession()
+                session = ClientSession(trust_env = True)
+                sessions.append(session)
                 response = await session.request(method, url, **kwargs)
             # log.debug('Response: {}'.format(response.text))
         except ClientSSLError as e:
@@ -90,13 +93,25 @@ class Provider(object):
                 connector = ProxyConnector.from_url(self.proxy, verify_ssl=False)
             else:
                 connector = TCPConnector(verify_ssl=False)
-            session = ClientSession(connector=connector)
+            session = ClientSession(connector=connector, trust_env = True)
+            sessions.append(session)
             response = await session.request(method, url.replace('https', 'http'), proxy=self.proxy, **kwargs)
+            # log.debug('Response: {}'.format(response.text))
+        except SSLCertVerificationError as e:
+            log.error(e)
+            if self.proxy:
+                connector = ProxyConnector.from_url(self.proxy, verify_ssl=False)
+            else:
+                connector = TCPConnector(verify_ssl=False)
+            session = ClientSession(connector=connector, trust_env = True)
+            sessions.append(session)
+            response = await session.request(method, url, proxy=self.proxy, **kwargs)
             # log.debug('Response: {}'.format(response.text))
         except Exception as e:
             log.error(e)
         finally:
-            await session.close()
+            for session in sessions:
+                await session.close()
             return response
 
     async def notify(self, **kwargs):
